@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Freezer</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background: #f7f7f7; border-radius: 10px; }
+    label { font-weight: bold; margin-top: 10px; display: block; }
+    input, select, button { width: 100%; padding: 10px; margin: 6px 0; font-size: 1rem; }
+    button { border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { opacity: 0.9; }
+    #deleteButton { background-color: red; color: white; display: none; margin-top: 10px; }
+    #saveButton { background-color: #007bff; color: white; }
+    h2 { text-align: center; }
+  </style>
+</head>
+<body>
+  <h2>Gestione Freezer</h2>
+  <form id="freezerForm">
+    <!-- TAG nascosto -->
+    <input type="hidden" id="TAG" value="" />
+
+    <label for="Prodotto">Prodotto</label>
+    <input type="text" id="Prodotto" placeholder="Prodotto" />
+
+    <label for="Peso">Peso (g)</label>
+    <input type="number" id="Peso" placeholder="Peso (g)" />
+
+    <label for="Posizione">Posizione</label>
+    <select id="Posizione">
+      <option value="Freezer">Freezer</option> <!-- default -->
+      <option value="Cassetto 1">Cassetto 1</option>
+      <option value="Cassetto 2">Cassetto 2</option>
+      <option value="Cassetto 3">Cassetto 3</option>
+    </select>
+
+    <label for="DataIn">Data Congelamento</label>
+    <input type="text" id="DataIn" placeholder="Data In (GG/MM/YYYY)" />
+
+    <!-- Campo DataOut per record esistente -->
+    <label for="DataOut" id="labelDataOut">Data Scadenza</label>
+    <input type="text" id="DataOut" placeholder="Data Out (GG/MM/YYYY)" />
+
+    <!-- Menu a tendina per nuovi record -->
+    <div id="selectDataOutContainer" style="display:none">
+      <label for="DataOutSelect">Seleziona Durata</label>
+      <select id="DataOutSelect">
+        <option value="1">1 Mese</option>
+        <option value="2">2 Mesi</option>
+        <option value="3">3 Mesi</option>
+        <option value="4">4 Mesi</option>
+        <option value="5">5 Mesi</option>
+        <option value="6">6 Mesi</option>
+        <option value="7">7 Mesi</option>
+        <option value="8">8 Mesi</option>
+        <option value="9">9 Mesi</option>
+        <option value="10">10 Mesi</option>
+        <option value="11">11 Mesi</option>
+        <option value="12">12 Mesi</option>
+      </select>
+    </div>
+
+    <!-- DaysToOut con label condizionale -->
+    <div id="daysToOutContainer" style="display:none">
+      <label for="DaysToOut">Giorni Mancanti alla Scadenza</label>
+      <input type="number" id="DaysToOut" placeholder="Days To Out" />
+    </div>
+
+    <button type="submit" id="saveButton">💾 Salva</button>
+    <button type="button" id="deleteButton">🗑️ Elimina</button>
+  </form>
+
+  <script>
+    // CONFIGURAZIONE
+    const token = "patgOJzGUYCwQg2Ip.58daf3ddc7ef3f0fb0874465c446ede4edf5e38bb68b79c211582698fb9ed341";
+    const baseId = "apphIv8uQqGUV00Jd";
+    const tableName = "freezer";
+
+    const form = document.getElementById("freezerForm");
+    const deleteBtn = document.getElementById("deleteButton");
+
+    // HELPERS PER DATE
+    function formatDateDDMMYYYY(dateStr) {
+      if (!dateStr) return "";
+      const d = new Date(dateStr);
+      const dd = String(d.getDate()).padStart(2,'0');
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    }
+
+    function parseDateFromDDMMYYYY(str) {
+      if (!str) return null;
+      const [dd, mm, yyyy] = str.split('/');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // FUNZIONI API
+    async function fetchRecordByTag(tag) {
+      const res = await fetch(`https://api.airtable.com/v0/${baseId}/${tableName}?filterByFormula={TAG}="${tag}"`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      return data.records?.[0] || null;
+    }
+
+    async function updateRecord(id, fields) {
+      const res = await fetch(`https://api.airtable.com/v0/${baseId}/${tableName}/${id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ fields })
+      });
+      return res.json();
+    }
+
+    async function createRecord(fields) {
+      const res = await fetch(`https://api.airtable.com/v0/${baseId}/${tableName}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ fields })
+      });
+      return res.json();
+    }
+
+    async function deleteRecord(id) {
+      const res = await fetch(`https://api.airtable.com/v0/${baseId}/${tableName}/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return res.json();
+    }
+
+    function fillForm(record) {
+      for (const field in record.fields) {
+        const input = document.getElementById(field);
+        if (input) {
+          if (field === "DataIn" || field === "DataOut") {
+            input.value = formatDateDDMMYYYY(record.fields[field]);
+          } else if (field === "Posizione") {
+            input.value = record.fields[field] || "Freezer";
+          } else {
+            input.value = record.fields[field];
+          }
+        }
+      }
+    }
+
+    function showDaysToOut(show) {
+      document.getElementById("daysToOutContainer").style.display = show ? "block" : "none";
+    }
+
+    function updateDataOutFromSelect() {
+      const mesi = parseInt(document.getElementById("DataOutSelect").value);
+      const dataInStr = document.getElementById("DataIn").value;
+      if(!dataInStr) return;
+
+      const [dd, mm, yyyy] = dataInStr.split('/');
+      const dataIn = new Date(`${yyyy}-${mm}-${dd}`);
+
+      const dataOut = new Date(dataIn);
+      dataOut.setMonth(dataOut.getMonth() + mesi);
+
+      const ddOut = String(dataOut.getDate()).padStart(2,'0');
+      const mmOut = String(dataOut.getMonth()+1).padStart(2,'0');
+      const yyyyOut = dataOut.getFullYear();
+      document.getElementById("DataOut").value = `${ddOut}/${mmOut}/${yyyyOut}`;
+    }
+
+    document.getElementById("DataOutSelect").addEventListener("change", updateDataOutFromSelect);
+
+    // LETTURA TAG DALL'URL
+    const tag = new URLSearchParams(window.location.search).get("TAG");
+    console.log("DEBUG: TAG letto dall'URL =", tag);
+    document.getElementById("TAG").value = tag || "";
+
+    // valori di default DataIn e Posizione
+    const oggi = new Date();
+    const dd = String(oggi.getDate()).padStart(2,'0');
+    const mm = String(oggi.getMonth()+1).padStart(2,'0');
+    const yyyy = oggi.getFullYear();
+    document.getElementById("DataIn").value = `${dd}/${mm}/${yyyy}`;
+    document.getElementById("Posizione").value = "Freezer";
+
+    // recupero record se TAG esiste
+    if(tag) {
+      fetchRecordByTag(tag).then(record => {
+        if(record) {
+          fillForm(record);
+          showDaysToOut(true);
+
+          // DataOut visibile e select nascosto
+          document.getElementById("DataOut").style.display = "block";
+          document.getElementById("labelDataOut").style.display = "block";
+          document.getElementById("selectDataOutContainer").style.display = "none";
+
+          // Mostra pulsante Elimina
+          deleteBtn.style.display = "block";
+          deleteBtn.onclick = async () => {
+            if(confirm("Sei sicuro di voler eliminare questo record?")) {
+              const res = await deleteRecord(record.id);
+              if(res.error) {
+                alert("❌ Errore eliminazione: " + JSON.stringify(res.error));
+              } else {
+                alert("✅ Record eliminato con successo!");
+                form.reset();
+                document.getElementById("DataOut").style.display = "none";
+                document.getElementById("labelDataOut").style.display = "none";
+                document.getElementById("selectDataOutContainer").style.display = "block";
+                document.getElementById("Posizione").value = "Freezer";
+                showDaysToOut(false);
+                deleteBtn.style.display = "none";
+              }
+            }
+          }
+
+          if(record.fields.DataOut) {
+            const dataOut = new Date(record.fields.DataOut);
+            const diffTime = dataOut - oggi;
+            const diffDays = Math.ceil(diffTime / (1000*60*60*24));
+            document.getElementById("DaysToOut").value = diffDays;
+          }
+
+        } else {
+          // TAG non esiste → nuovo record
+          showDaysToOut(false);
+          document.getElementById("DataOut").style.display = "none";
+          document.getElementById("labelDataOut").style.display = "none";
+          document.getElementById("selectDataOutContainer").style.display = "block";
+          updateDataOutFromSelect();
+          deleteBtn.style.display = "none";
+        }
+      });
+    } else {
+      // TAG non presente
+      showDaysToOut(false);
+      document.getElementById("DataOut").style.display = "none";
+      document.getElementById("labelDataOut").style.display = "none";
+      document.getElementById("selectDataOutContainer").style.display = "block";
+      updateDataOutFromSelect();
+      deleteBtn.style.display = "none";
+    }
+
+    // GESTIONE FORM SUBMIT
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const tagValue = document.getElementById("TAG").value;
+      if(!tagValue) {
+        alert("❌ Errore: TAG mancante!");
+        return;
+      }
+
+      const fields = {
+        TAG: tagValue,
+        Prodotto: document.getElementById("Prodotto").value,
+        Peso: parseFloat(document.getElementById("Peso").value) || null,
+        Posizione: document.getElementById("Posizione").value,
+        DataIn: parseDateFromDDMMYYYY(document.getElementById("DataIn").value) || null,
+        DataOut: parseDateFromDDMMYYYY(document.getElementById("DataOut").value) || null
+      };
+
+      const existing = await fetchRecordByTag(fields.TAG);
+      if(existing) {
+        const result = await updateRecord(existing.id, fields);
+        if(result.error) {
+          console.error(result);
+          alert("❌ Errore Airtable: " + JSON.stringify(result.error));
+        } else {
+          alert("✅ Record aggiornato con successo!");
+        }
+      } else {
+        const result = await createRecord(fields);
+        if(result.error) {
+          console.error(result);
+          alert("❌ Errore Airtable: " + JSON.stringify(result.error));
+        } else {
+          alert("🆕 Nuovo record creato!");
+        }
+      }
+    });
+  </script>
+</body>
+</html>

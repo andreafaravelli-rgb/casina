@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elenco Freezer</title>
+<style>
+body { font-family: Arial, sans-serif; margin:20px; background:#f8f8f8; }
+h2 { text-align:center; margin-bottom:20px; }
+
+table { width:100%; border-collapse: collapse; margin-bottom:20px; }
+th, td { padding:10px; border-bottom:1px solid #ddd; text-align:left; }
+th { background-color:#007bff; color:white; }
+tr:hover { background-color:#f1f1f1; }
+.expired { background-color:#f8d7da; }
+.warning { background-color:#fff3cd; }
+.safe { background-color:#d4edda; }
+
+/* Cellulare: cards */
+@media(max-width:768px){
+  body { font-size:20px; }
+  table, thead, tbody, th, td, tr { display:block; width:100%; }
+  thead tr { display:none; }
+  tr { margin-bottom:15px; border-radius:8px; padding:10px; color:#333; }
+  td { border:none; padding:5px 0; }
+  td:before { font-weight:bold; display:inline-block; width:120px; }
+  td:nth-of-type(1):before { content:"TAG"; }
+  td:nth-of-type(2):before { content:"Prodotto"; }
+  td:nth-of-type(3):before { content:"Peso"; }
+  td:nth-of-type(4):before { content:"IN"; }
+  td:nth-of-type(5):before { content:"OUT"; }
+  td:nth-of-type(6):before { content:"Giorni"; }
+  td:nth-of-type(7):before { content:"Posizione"; }
+  td:nth-of-type(8):before { content:"Modifica"; }
+  td:nth-of-type(9):before { content:"Cancella"; }
+}
+
+button { padding:5px 10px; margin:2px; border:none; border-radius:5px; cursor:pointer; }
+.editBtn { background:#007bff; color:white; }
+.deleteBtn { background:red; color:white; }
+
+/* Modal form */
+#editModal {
+  display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+  background: rgba(0,0,0,0.5); justify-content:center; align-items:center;
+}
+#editModalContent {
+  background:white; padding:20px; border-radius:10px; max-width:400px; width:90%;
+}
+#editModalContent label { display:block; margin-top:10px; font-weight:bold; }
+#editModalContent input, #editModalContent select { width:100%; padding:8px; margin-top:5px; }
+#closeModal { background:#555; color:white; margin-top:10px; }
+#saveModal { background:#007bff; color:white; margin-top:10px; }
+</style>
+</head>
+<body>
+
+<h2>Elenco prodotti in Freezer</h2>
+<div id="message">Caricamento dati...</div>
+<table id="recordsTable">
+  <thead>
+    <tr>
+      <th>TAG</th>
+      <th>Prodotto</th>
+      <th>Peso (g)</th>
+      <th>IN</th>
+      <th>OUT</th>
+      <th>Giorni</th>
+      <th>Posizione</th>
+      <th>Modifica</th>
+      <th>Cancella</th>
+    </tr>
+  </thead>
+  <tbody id="recordsBody"></tbody>
+</table>
+
+<!-- MODAL EDIT -->
+<div id="editModal">
+  <div id="editModalContent">
+    <h3>Modifica Record</h3>
+    <label>TAG</label>
+    <input type="text" id="modalTAG" disabled>
+
+    <label>Prodotto</label>
+    <input type="text" id="modalProdotto">
+
+    <label>Peso (g)</label>
+    <input type="number" id="modalPeso">
+
+    <label>Posizione</label>
+    <select id="modalPosizione">
+      <option value="Freezer">Freezer</option>
+      <option value="Cassetto 1">Cassetto 1</option>
+      <option value="Cassetto 2">Cassetto 2</option>
+      <option value="Cassetto 3">Cassetto 3</option>
+    </select>
+
+    <label>IN</label>
+    <input type="text" id="modalDataIn">
+
+    <label>OUT</label>
+    <input type="text" id="modalDataOut">
+
+    <button id="saveModal">Salva Modifiche</button>
+    <button id="closeModal">Chiudi</button>
+  </div>
+</div>
+
+<script>
+const AIRTABLE_API_KEY = "patgOJzGUYCwQg2Ip.58daf3ddc7ef3f0fb0874465c446ede4edf5e38bb68b79c211582698fb9ed341";
+const AIRTABLE_BASE_ID = "apphIv8uQqGUV00Jd";
+const AIRTABLE_TABLE_NAME = "Freezer";
+const apiUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
+
+const messageDiv=document.getElementById("message");
+const tbody=document.getElementById("recordsBody");
+const editModal=document.getElementById("editModal");
+const modalTAG=document.getElementById("modalTAG");
+const modalProdotto=document.getElementById("modalProdotto");
+const modalPeso=document.getElementById("modalPeso");
+const modalPosizione=document.getElementById("modalPosizione");
+const modalDataIn=document.getElementById("modalDataIn");
+const modalDataOut=document.getElementById("modalDataOut");
+const saveModalBtn=document.getElementById("saveModal");
+const closeModalBtn=document.getElementById("closeModal");
+
+function formatDate(d){
+  if(!d) return "";
+  const date=new Date(d);
+  const dd=String(date.getDate()).padStart(2,'0');
+  const mm=String(date.getMonth()+1).padStart(2,'0');
+  const yyyy=date.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function parseDate(d){
+  if(!d) return null;
+  const [dd, mm, yyyy] = d.split('/');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+async function caricaDati(){
+  try{
+    const res=await fetch(apiUrl,{headers:{Authorization:`Bearer ${AIRTABLE_API_KEY}`}});
+    const data=await res.json();
+    if(!data.records || data.records.length===0){
+      messageDiv.textContent="Nessun record trovato.";
+      return;
+    }
+
+    const ordinati=data.records.sort((a,b)=>{
+      const aDays=Math.abs(a.fields.DaysToOut||0);
+      const bDays=Math.abs(b.fields.DaysToOut||0);
+      return aDays-bDays;
+    });
+
+    tbody.innerHTML="";
+    ordinati.forEach(r=>{
+      const f=r.fields;
+      const tr=document.createElement("tr");
+
+      const days=Math.abs(f.DaysToOut||0);
+      if(days<=5) tr.classList.add("expired");
+      else if(days<=15) tr.classList.add("warning");
+      else tr.classList.add("safe");
+
+      tr.innerHTML=`
+        <td>${f.TAG||""}</td>
+        <td>${f.Prodotto||""}</td>
+        <td>${f.Peso||""}</td>
+        <td>${formatDate(f.DataIn)}</td>
+        <td>${formatDate(f.DataOut)}</td>
+        <td>${days}</td>
+        <td>${f.Posizione||""}</td>
+        <td><button class="editBtn">✏️</button></td>
+        <td><button class="deleteBtn">🗑️</button></td>
+      `;
+      tbody.appendChild(tr);
+
+      tr.querySelector(".editBtn").onclick=()=>openEditModal(r);
+      tr.querySelector(".deleteBtn").onclick=()=>alert("Funzione Cancella non implementata");
+    });
+
+    messageDiv.style.display="none";
+  } catch(err){
+    messageDiv.textContent="❌ Errore nel caricamento dei dati.";
+    console.error(err);
+  }
+}
+
+function openEditModal(record){
+  modalTAG.value=record.fields.TAG||"";
+  modalProdotto.value=record.fields.Prodotto||"";
+  modalPeso.value=record.fields.Peso||"";
+  modalPosizione.value=record.fields.Posizione||"Freezer";
+  modalDataIn.value=formatDate(record.fields.DataIn);
+  modalDataOut.value=formatDate(record.fields.DataOut);
+
+  editModal.style.display="flex";
+
+  saveModalBtn.onclick=async()=>{
+    const updatedFields={
+      Prodotto:modalProdotto.value,
+      Peso:parseFloat(modalPeso.value)||null,
+      Posizione:modalPosizione.value,
+      DataIn:parseDate(modalDataIn.value),
+      DataOut:parseDate(modalDataOut.value)
+    };
+
+    try{
+      const res=await fetch(`${apiUrl}/${record.id}`,{
+        method:"PATCH",
+        headers:{Authorization:`Bearer ${AIRTABLE_API_KEY}`,"Content-Type":"application/json"},
+        body:JSON.stringify({fields:updatedFields})
+      });
+      const result=await res.json();
+      if(result.error){alert("❌ Errore aggiornamento: "+JSON.stringify(result.error));}
+      else {alert("✅ Record aggiornato!"); editModal.style.display="none"; caricaDati();}
+    }catch(err){alert("❌ Errore aggiornamento"); console.error(err);}
+  };
+}
+
+closeModalBtn.onclick=()=>{editModal.style.display="none";};
+
+caricaDati();
+</script>
+</body>
+</html>
